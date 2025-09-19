@@ -171,8 +171,8 @@ def background_stock_checker():
     """后台定期检查库存"""
     while True:
         check_all_models_stock()
-        # 每5分钟更新一次
-        time.sleep(300)
+        # 每1分钟更新一次
+        time.sleep(60)
 
 @app.route('/')
 def index():
