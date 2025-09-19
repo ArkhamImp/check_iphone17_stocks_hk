@@ -211,4 +211,4 @@ if __name__ == '__main__':
     # 初始化库存数据
     check_all_models_stock()
     
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000)
