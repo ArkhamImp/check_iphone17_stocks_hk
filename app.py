@@ -102,13 +102,19 @@ for series, colors in MODEL_DETAILS.items():
 
 # 全局变量存储最新的库存数据
 stock_data = {}
-last_updated = None
-is_checking = False
+last_updated = {}
+is_checking = {}
+model_checking_status = {}
 
 def check_stock_for_model(model_name, model_code):
     """为指定型号检查库存"""
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Referer": "https://www.apple.com/hk/shop/buy-iphone/",
     }
     
     params = {
@@ -117,7 +123,7 @@ def check_stock_for_model(model_name, model_code):
     }
     
     try:
-        response = requests.get(API_ENDPOINT, params=params, headers=headers)
+        response = requests.get(API_ENDPOINT, params=params, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -145,34 +151,45 @@ def check_stock_for_model(model_name, model_code):
     except Exception as e:
         return {"error": str(e)}
 
-def check_all_models_stock():
-    """检查所有型号的库存"""
-    global stock_data, last_updated, is_checking
+def check_single_model_stock(model_name, model_code):
+    """检查单个型号的库存"""
+    global stock_data, last_updated, is_checking, model_checking_status
     
-    if is_checking:
+    if is_checking.get(model_name, False):
         return
     
-    is_checking = True
+    is_checking[model_name] = True
+    model_checking_status[model_name] = True
     
     try:
-        new_stock_data = {}
-        
-        for model_name, model_code in IPHONE_17_PRO_MAX_MODELS.items():
-            new_stock_data[model_name] = check_stock_for_model(model_name, model_code)
-            # 避免请求过于频繁
-            time.sleep(1)
-        
-        stock_data = new_stock_data
-        last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        result = check_stock_for_model(model_name, model_code)
+        stock_data[model_name] = result
+        last_updated[model_name] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    except Exception as e:
+        stock_data[model_name] = {"error": str(e)}
+        last_updated[model_name] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     finally:
-        is_checking = False
+        is_checking[model_name] = False
+        model_checking_status[model_name] = False
+
+def check_all_models_stock():
+    """检查所有型号的库存（保留兼容性）"""
+    for model_name, model_code in IPHONE_17_PRO_MAX_MODELS.items():
+        check_single_model_stock(model_name, model_code)
+        # 避免请求过于频繁
+        time.sleep(0.5)
 
 def background_stock_checker():
-    """后台定期检查库存"""
+    """后台定期检查库存 - 每个型号独立5秒刷新"""
     while True:
-        check_all_models_stock()
-        # 每1分钟更新一次
-        time.sleep(60)
+        for model_name, model_code in IPHONE_17_PRO_MAX_MODELS.items():
+            # 启动独立线程检查每个型号
+            threading.Thread(target=check_single_model_stock, args=(model_name, model_code), daemon=True).start()
+            # 每个型号间隔0.2秒启动，避免同时请求
+            time.sleep(0.2)
+        
+        # 等待5秒后开始下一轮
+        time.sleep(5)
 
 @app.route('/')
 def index():
@@ -194,7 +211,8 @@ def get_stock():
     """获取库存数据的API"""
     return jsonify({
         "stock": stock_data,
-        "lastUpdated": last_updated
+        "lastUpdated": last_updated,
+        "checkingStatus": model_checking_status
     })
 
 @app.route('/api/refresh', methods=['POST'])
@@ -203,12 +221,26 @@ def refresh_stock():
     threading.Thread(target=check_all_models_stock).start()
     return jsonify({"status": "refreshing"})
 
+@app.route('/api/refresh/<model_name>', methods=['POST'])
+def refresh_single_model(model_name):
+    """手动刷新单个型号的库存"""
+    if model_name in IPHONE_17_PRO_MAX_MODELS:
+        model_code = IPHONE_17_PRO_MAX_MODELS[model_name]
+        threading.Thread(target=check_single_model_stock, args=(model_name, model_code), daemon=True).start()
+        return jsonify({"status": "refreshing", "model": model_name})
+    else:
+        return jsonify({"error": "Model not found"}), 404
+
 if __name__ == '__main__':
     # 启动后台线程检查库存
     stock_checker_thread = threading.Thread(target=background_stock_checker, daemon=True)
     stock_checker_thread.start()
     
-    # 初始化库存数据
-    check_all_models_stock()
+    # 在后台线程中初始化库存数据，避免阻塞主线程
+    def init_stock_data():
+        check_all_models_stock()
     
-    app.run(host='0.0.0.0', port=5000)
+    init_thread = threading.Thread(target=init_stock_data, daemon=True)
+    init_thread.start()
+    
+    app.run(host='0.0.0.0', port=3000)
