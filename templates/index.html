@@ -159,14 +159,81 @@
                     <div class="last-update">
                         <i class="far fa-clock me-1"></i> 
                         <span v-if="Object.keys(lastUpdated).length > 0">
-                            各型号独立更新中 (每5秒)
+                            各型号独立更新中 (每${ config.refresh_interval }$秒)
                         </span>
                         <span v-else>加载中...</span>
                     </div>
-                    <button class="btn btn-primary" @click="refreshStock" :disabled="isRefreshing">
-                        <i class="fas fa-sync-alt me-1" :class="{'fa-spin': isRefreshing}"></i> 
-                        ${ isRefreshing ? '刷新中...' : '刷新所有库存' }$
-                    </button>
+                    <div>
+                        <!-- 设置按钮已隐藏
+                        <button class="btn btn-sm btn-outline-secondary me-2" data-bs-toggle="modal" data-bs-target="#configModal">
+                            <i class="fas fa-cog me-1"></i> 设置
+                        </button>
+                        -->
+                        <button class="btn btn-primary" @click="refreshStock" :disabled="isRefreshing">
+                            <i class="fas fa-sync-alt me-1" :class="{'fa-spin': isRefreshing}"></i> 
+                            ${ isRefreshing ? '刷新中...' : '刷新所有库存' }$
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 配置模态框 - 不要使用v-if，这会导致DOM元素不存在而无法初始化 -->
+            <div class="modal fade" id="configModal" tabindex="-1" aria-labelledby="configModalLabel" aria-hidden="true">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="configModalLabel">系统设置</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form @submit.prevent="saveConfig">
+                                <div class="mb-3">
+                                    <label for="refreshInterval" class="form-label">刷新间隔(秒)</label>
+                                    <input type="number" class="form-control" id="refreshInterval" 
+                                        v-model="configForm.refresh_interval"
+                                        min="5" max="60" step="1" required>
+                                    <div class="form-text">设置较长的刷新间隔可以降低被封IP的风险(5-60秒)</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="requestDelay" class="form-label">请求间隔(秒)</label>
+                                    <input type="number" class="form-control" id="requestDelay" 
+                                        v-model="configForm.request_delay"
+                                        min="0.1" max="2.0" step="0.1" required>
+                                    <div class="form-text">每次请求之间的最小间隔时间，值越小速度越快但风险越高</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="batchSize" class="form-label">并发批次大小</label>
+                                    <input type="number" class="form-control" id="batchSize" 
+                                        v-model="configForm.batch_size"
+                                        min="1" max="20" step="1" required>
+                                    <div class="form-text">同时处理的最大请求数量，值越大速度越快但风险越高</div>
+                                </div>
+                                
+                                <hr class="my-4">
+                                <h5>代理设置（高级）</h5>
+                                
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="useProxy" 
+                                        v-model="configForm.use_proxy">
+                                    <label class="form-check-label" for="useProxy">使用代理</label>
+                                    <div class="form-text">启用后，将通过代理服务器发送请求，降低封锁风险</div>
+                                </div>
+                                
+                                <div class="mb-3" v-if="configForm.use_proxy">
+                                    <label for="proxyList" class="form-label">代理服务器列表</label>
+                                    <textarea class="form-control" id="proxyList" rows="4"
+                                        v-model="proxyListText" placeholder="每行一个代理，格式: http://host:port 或 http://user:pass@host:port"></textarea>
+                                    <div class="form-text">每行输入一个代理地址，系统将在每次请求时随机选择</div>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                            <button type="button" class="btn btn-primary" @click="saveConfig">保存设置</button>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -285,8 +352,7 @@
                                     </div>
                                 </div>
                                 <div v-else class="p-3 text-center text-muted">
-                                    <i class="fas fa-spinner fa-spin me-2" v-if="isLoading"></i>
-                                    <span v-else>暂无库存数据</span>
+                                    <span>暂无库存数据</span>
                                 </div>
                             </div>
                         </div>
@@ -322,6 +388,16 @@
                 selectedSeries: {},
                 selectedColors: {},
                 selectedCapacities: {},
+                config: JSON.parse('{{ config_json | safe }}'),
+                configForm: {
+                    refresh_interval: 10,
+                    request_delay: 0.5,
+                    batch_size: 5,
+                    use_proxy: false,
+                    proxy_list: []
+                },
+                proxyListText: '',
+                showConfigModal: false,
             },
             computed: {
                 filteredModelDetails() {
@@ -347,17 +423,15 @@
             },
             methods: {
                 fetchStockData() {
-                    this.isLoading = true;
+                    // 不再设置isLoading标志，避免显示全局加载动画
                     axios.get('/api/stock')
                         .then(response => {
                             this.stockData = response.data.stock;
                             this.lastUpdated = response.data.lastUpdated;
                             this.checkingStatus = response.data.checkingStatus || {};
-                            this.isLoading = false;
                         })
                         .catch(error => {
                             console.error('Error fetching stock data:', error);
-                            this.isLoading = false;
                         });
                 },
                 refreshStock() {
@@ -531,21 +605,101 @@
                     this.availableCapacities.forEach(capacity => {
                         this.$set(this.selectedCapacities, capacity, true);
                     });
+                },
+                initConfigForm() {
+                    // 从当前配置初始化表单
+                    this.configForm.refresh_interval = this.config.refresh_interval;
+                    this.configForm.rate_limit_tokens = this.config.rate_limit_tokens;
+                    this.configForm.rate_limit_per_second = this.config.rate_limit_per_second;
+                    this.configForm.use_proxy = this.config.use_proxy || false;
+                    this.configForm.proxy_list = Array.isArray(this.config.proxy_list) ? [...this.config.proxy_list] : [];
+                    
+                    // 将代理列表转换为文本格式
+                    this.proxyListText = this.configForm.proxy_list.join('\n');
+                },
+                saveConfig() {
+                    // 处理代理列表
+                    if (this.configForm.use_proxy && this.proxyListText) {
+                        // 将文本框内容按行拆分为代理列表
+                        const lines = this.proxyListText.split('\n').filter(line => line.trim() !== '');
+                        this.configForm.proxy_list = lines;
+                    } else {
+                        this.configForm.proxy_list = [];
+                    }
+                    
+                    // 保存配置到后端
+                    axios.post('/api/config', this.configForm)
+                        .then(response => {
+                            if (response.data && response.data.status === 'success') {
+                                // 更新本地配置
+                                this.config = response.data.config;
+                                // 关闭模态框
+                                const modalElement = document.getElementById('configModal');
+                                const modalInstance = bootstrap.Modal.getInstance(modalElement);
+                                if (modalInstance) {
+                                    modalInstance.hide();
+                                }
+                                // 提示保存成功
+                                alert('设置已保存');
+                            } else {
+                                alert('保存失败: ' + JSON.stringify(response.data.error));
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error saving config:', error);
+                            alert('保存设置失败: ' + (error.response ? error.response.data.error : error.message));
+                        });
                 }
             },
             created() {
                 // 加载用户之前的所有选择
                 this.loadPreferences();
                 
-                // 初始加载数据
-                this.fetchStockData();
+                // 初始化配置表单
+                this.initConfigForm();
                 
-                // 每10秒自动更新一次数据（获取最新的检查状态）
+                // 初始加载数据 - 仅在初始加载时显示加载动画
+                this.isLoading = true; // 仅在初始加载时设置loading
+                axios.get('/api/stock')
+                    .then(response => {
+                        this.stockData = response.data.stock;
+                        this.lastUpdated = response.data.lastUpdated;
+                        this.checkingStatus = response.data.checkingStatus || {};
+                        this.isLoading = false;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching stock data:', error);
+                        this.isLoading = false;
+                    });
+                
+                // 每秒自动更新一次数据（获取最新的检查状态）- 无动画
                 setInterval(() => {
                     if (!this.isRefreshing) {
-                        this.fetchStockData();
+                        this.fetchStockData(); // 使用无动画的方法
                     }
-                }, 1000);
+                }, 10000);
+                
+                // 初始化Bootstrap模态框
+                this.$nextTick(() => {
+                    const modalElement = document.getElementById('configModal');
+                    if (modalElement) {
+                        // 确保DOM已加载完成
+                        const modal = new bootstrap.Modal(modalElement);
+                        
+                        // 模态框已通过HTML数据属性配置
+                        
+                        // 监听模态框打开事件
+                        modalElement.addEventListener('show.bs.modal', () => {
+                            this.initConfigForm();
+                            this.showConfigModal = true;
+                        });
+                        
+                        // 监听模态框关闭事件
+                        modalElement.addEventListener('hidden.bs.modal', () => {
+                            this.showConfigModal = false;
+                        });
+                    }
+                });
             }
         });
     </script>
