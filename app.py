@@ -16,7 +16,7 @@ def to_json(value):
     return json.dumps(value)
 
 # Apple 库存查询 API 端点
-API_ENDPOINT = "https://www.apple.com/hk/shop/fulfillment-messages"
+API_ENDPOINT = "https://www.apple.com/hk/shop/pickup-message-recommendations"
 
 # iPhone 17 Pro Max 的产品型号代码
 IPHONE_17_PRO_MAX_MODELS = {
@@ -152,7 +152,7 @@ def check_stock_for_model(model_name, model_code, batch_mode=False, max_retries=
     }
     
     params = {
-        "parts.0": model_code,
+        "product": model_code,
         "location": "Hong Kong",
     }
     
@@ -169,7 +169,7 @@ def check_stock_for_model(model_name, model_code, batch_mode=False, max_retries=
             response.raise_for_status()
             data = response.json()
             
-            stores_data = data.get("body", {}).get("content", {}).get("pickupMessage", {}).get("stores", [])
+            stores_data = data.get("body", {}).get("PickupMessage", {}).get("stores", [])
             
             if not stores_data:
                 if batch_mode and attempt < max_retries:
@@ -182,15 +182,22 @@ def check_stock_for_model(model_name, model_code, batch_mode=False, max_retries=
             for store in stores_data:
                 store_name = store.get("storeName")
                 parts_availability = store.get("partsAvailability", {})
-                model_stock_info = parts_availability.get(model_code)
                 
-                if model_stock_info:
+                
+                if parts_availability:
+                    model_stock_info = parts_availability.get(model_code)
                     pickup_status = model_stock_info.get("pickupSearchQuote", "未知状态")
                     pickup_display = model_stock_info.get("pickupDisplay", "unknown")
                     stores_availability.append({
                         "store": store_name,
                         "status": pickup_status,
                         "available": pickup_display == "available"
+                    })
+                else:
+                    stores_availability.append({
+                        "store": store_name,
+                        "status": "unknown",
+                        "available": False
                     })
             
             # 如果成功处理了数据，返回结果
