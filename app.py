@@ -17,7 +17,7 @@ def to_json(value):
     return json.dumps(value)
 
 # Apple 库存查询 API 端点
-API_ENDPOINT = "https://www.apple.com/hk/shop/fulfillment-messages"
+API_ENDPOINT = "https://www.apple.com/hk-zh/shop/fulfillment-messages"
 #API_ENDPOINT = "https://www.apple.com/cn/shop/fulfillment-messages"
 
 # iPhone 17 Pro Max 的产品型号代码
