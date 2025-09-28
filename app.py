@@ -7,7 +7,6 @@ import threading
 from datetime import datetime
 from user_agents import get_random_user_agent
 from proxy_manager import proxy_manager
-from urllib.parse import quote
 
 app = Flask(__name__)
 
@@ -17,8 +16,7 @@ def to_json(value):
     return json.dumps(value)
 
 # Apple 库存查询 API 端点
-API_ENDPOINT = "https://www.apple.com/hk-zh/shop/fulfillment-messages"
-#API_ENDPOINT = "https://www.apple.com/cn/shop/fulfillment-messages"
+API_ENDPOINT = "https://www.apple.com/hk/shop/pickup-message-recommendations"
 
 # iPhone 17 Pro Max 的产品型号代码
 IPHONE_17_PRO_MAX_MODELS = {
@@ -154,7 +152,7 @@ def check_stock_for_model(model_name, model_code, batch_mode=False, max_retries=
     }
     
     params = {
-        "parts.0": model_code,
+        "product": model_code,
         "location": "Hong Kong",
     }
     
@@ -167,11 +165,11 @@ def check_stock_for_model(model_name, model_code, batch_mode=False, max_retries=
             proxies = proxy_manager.get_random_proxy() if CONFIG['use_proxy'] else None
             
             # 发送请求，可选使用代理
-            response = requests.get(API_ENDPOINT, params=params, headers=headers, proxies=proxies)
+            response = requests.get(API_ENDPOINT, params=params, headers=headers, proxies=proxies, timeout=10)
             response.raise_for_status()
             data = response.json()
             
-            stores_data = data.get("body", {}).get("content", {}).get("PickupMessage", {}).get("stores", [])
+            stores_data = data.get("body", {}).get("PickupMessage", {}).get("stores", [])
             
             if not stores_data:
                 if batch_mode and attempt < max_retries:
@@ -194,6 +192,12 @@ def check_stock_for_model(model_name, model_code, batch_mode=False, max_retries=
                         "store": store_name,
                         "status": pickup_status,
                         "available": pickup_display == "available"
+                    })
+                else:
+                    stores_availability.append({
+                        "store": store_name,
+                        "status": "unknown",
+                        "available": False
                     })
             
             # 如果成功处理了数据，返回结果
@@ -438,11 +442,14 @@ if __name__ == '__main__':
         init_thread.start()
         
         # 查找可用端口
-        port = 5001
+        port = find_free_port()
+        if port is None:
+            print("警告：无法找到可用端口，尝试使用默认3000端口")
+            port = 5000
         
         print(f"正在启动服务器，端口: {port}")
         # 使用localhost而不是0.0.0.0，减少权限问题
-        app.run(host='localhost', port=port, debug=True)
+        app.run(host='localhost', port=port, debug=False)
         
     except OSError as e:
         print(f"启动服务器失败: {e}")
